@@ -1,125 +1,128 @@
 import streamlit as st
-import json
-import os
-from deep_translator import GoogleTranslator
-from textblob import TextBlob
 from openai import OpenAI
+import time
 
-# --- Initialize OpenAI client ---
+# Initialize client
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-DATA_FILE = "data.json"
+st.set_page_config(page_title="Wellbeing Assistant", layout="wide")
 
-# ---------- TRANSLATION HELPERS ----------
-def detect_language(text):
-    try:
-        if any('\u0600' <= c <= '\u06FF' for c in text):
-            return "ar"
-        else:
-            return "en"
-    except Exception:
-        return "en"
+# --- Style ---
+st.markdown("""
+<style>
+.chat-bubble-user {
+    background-color: #DCF8C6;
+    color: black;
+    padding: 10px 15px;
+    border-radius: 20px;
+    margin: 5px 0;
+    text-align: right;
+    width: fit-content;
+    max-width: 80%;
+    align-self: flex-end;
+}
+.chat-bubble-ai {
+    background-color: #F1F0F0;
+    color: black;
+    padding: 10px 15px;
+    border-radius: 20px;
+    margin: 5px 0;
+    text-align: left;
+    width: fit-content;
+    max-width: 80%;
+    align-self: flex-start;
+}
+.chat-container {
+    display: flex;
+    flex-direction: column;
+}
+</style>
+""", unsafe_allow_html=True)
 
-def translate_to_en(text):
-    lang = detect_language(text)
-    if lang != "en":
+# --- Retry logic for OpenAI ---
+def call_openai_with_retry(prompt, model="gpt-4o-mini", retries=3, delay=5):
+    for i in range(retries):
         try:
-            return GoogleTranslator(source='auto', target='en').translate(text)
-        except Exception:
-            return text
-    return text
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "system", "content": "You are a helpful educational assistant."},
+                          {"role": "user", "content": prompt}]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if "RateLimitError" in str(type(e)) or "429" in str(e):
+                if i < retries - 1:
+                    st.warning(f"Rate limit reached. Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                else:
+                    st.error("OpenAI rate limit reached. Please try again later.")
+            else:
+                st.error(f"Error: {e}")
+                break
 
-def translate_from_en(text, target_lang):
-    if target_lang != "en":
-        try:
-            return GoogleTranslator(source='en', target=target_lang).translate(text)
-        except Exception:
-            return text
-    return text
+# --- Sidebar ---
+st.sidebar.title("Navigation")
+page = st.sidebar.radio("Go to", ["📄 Assignment Analyzer", "💬 Wellbeing Chatbox"])
 
-# ---------- HELPER FUNCTIONS ----------
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        return {"assignments": [], "chats": []}
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+# --- Assignment Analyzer ---
+if page == "📄 Assignment Analyzer":
+    st.title("📄 Student Assignment Analyzer")
+    st.write("Upload a student's short assignment *or* paste the text below to get a wellbeing risk score.")
 
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    tab1, tab2 = st.tabs(["📁 Upload File", "📝 Paste Text"])
 
-def analyze_text(text):
-    # Simple AI wellbeing classifier
-    prompt = f"""Classify this student's emotional state as Low, Medium, or High wellbeing risk.
-    Text: {text}
-    Respond only with one of these: Low, Medium, or High."""
-    
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content.strip()
+    text_content = ""
 
-def chat_with_ai(user_message, lang="en"):
-    translated = translate_to_en(user_message)
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a friendly school wellbeing chatbot that gives comforting and simple responses."},
-            {"role": "user", "content": translated}
-        ]
-    )
-    reply_en = response.choices[0].message.content.strip()
-    return translate_from_en(reply_en, lang)
+    with tab1:
+        uploaded_file = st.file_uploader("Upload a .txt or .docx file", type=["txt", "docx"])
+        if uploaded_file:
+            if uploaded_file.name.endswith(".txt"):
+                text_content = uploaded_file.read().decode("utf-8")
+            else:
+                from docx import Document
+                doc = Document(uploaded_file)
+                text_content = "\n".join([p.text for p in doc.paragraphs])
+            st.success("File uploaded successfully!")
 
-# ---------- STREAMLIT APP ----------
-st.set_page_config(page_title="AI Wellbeing System", layout="wide")
-st.title("💬 Bilingual AI Wellbeing System")
+    with tab2:
+        pasted_text = st.text_area("Paste student’s writing here:", height=200)
+        if pasted_text.strip():
+            text_content = pasted_text
 
-tabs = st.tabs(["📄 Analyze Student Assignment", "💭 Therapy Chatbox"])
+    if text_content:
+        st.subheader("🔍 Analyzing...")
+        with st.spinner("Analyzing emotional tone..."):
+            analysis_prompt = f"""
+            Analyze the following student's writing for emotional wellbeing risk:
+            - Determine if the tone suggests Low, Medium, or High wellbeing risk.
+            - Provide a one-sentence summary explaining your reasoning.
 
-# --- TAB 1: Analyze Assignment ---
-with tabs[0]:
-    st.header("📄 Upload and Analyze Assignment")
-    uploaded = st.file_uploader("Upload a student’s text file (.txt)", type=["txt"])
-    
-    if uploaded is not None:
-        text = uploaded.read().decode("utf-8")
-        st.subheader("Uploaded Text:")
-        st.text_area("Student’s Assignment", text, height=200)
-        
-        detected_lang = detect_language(text)
-        translated_text = translate_to_en(text)
-        
-        if st.button("🔍 Analyze Wellbeing Risk"):
-            result = analyze_text(translated_text)
-            
-            data = load_data()
-            data["assignments"].append({
-                "text": text,
-                "language": detected_lang,
-                "risk": result
-            })
-            save_data(data)
-            
-            st.success(f"AI Wellbeing Risk: **{result}**")
+            Student writing:
+            {text_content}
+            """
+            result = call_openai_with_retry(analysis_prompt)
+        st.success("✅ Analysis Complete!")
+        st.markdown(f"**AI Wellbeing Analysis:** {result}")
 
-# --- TAB 2: Chatbox ---
-with tabs[1]:
-    st.header("💭 Therapy Chatbox")
-    user_input = st.text_input("Type your message here...")
-    
-    if st.button("Send"):
-        if user_input.strip():
-            lang = detect_language(user_input)
-            ai_reply = chat_with_ai(user_input, lang)
-            
-            data = load_data()
-            data["chats"].append({"user": user_input, "ai": ai_reply})
-            save_data(data)
-            
-            st.markdown(f"**🧍You:** {user_input}")
-            st.markdown(f"**🤖 AI:** {ai_reply}")
+# --- Wellbeing Chatbox ---
+if page == "💬 Wellbeing Chatbox":
+    st.title("💬 Wellbeing Chat Support")
+
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = []
+
+    user_input = st.chat_input("Type your message...")
+
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        ai_response = call_openai_with_retry(user_input)
+        st.session_state.messages.append({"role": "assistant", "content": ai_response})
+
+    # Display messages as bubbles
+    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            st.markdown(f'<div class="chat-bubble-user">{msg["content"]}</div>', unsafe_allow_html=True)
         else:
-            st.warning("Please enter a message before sending.")
-
+            st.markdown(f'<div class="chat-bubble-ai">{msg["content"]}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)

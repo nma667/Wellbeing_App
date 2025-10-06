@@ -40,7 +40,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Retry logic for OpenAI ---
-def call_openai_with_retry(prompt, model="gpt-4o-mini", retries=3, delay=5):
+def call_openai_with_retry(prompt, model="gpt-3.5-turbo", retries=3, delay=5):
     for i in range(retries):
         try:
             response = client.chat.completions.create(

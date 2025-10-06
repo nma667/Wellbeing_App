@@ -1,7 +1,7 @@
 # app.py
 import streamlit as st
 import openai
-from googletrans import Translator  # using 4.0.0-rc1
+from deep_translator import GoogleTranslator
 from textblob import TextBlob
 import json
 import os
@@ -13,6 +13,33 @@ DATA_FILE = "data.json"
 
 translator = Translator()
 
+# ---------- TRANSLATION HELPERS ----------
+def detect_language(text):
+    try:
+        if any('\u0600' <= c <= '\u06FF' for c in text):
+            return "ar"
+        else:
+            return "en"
+    except Exception:
+        return "en"
+
+def translate_to_en(text):
+    lang = detect_language(text)
+    if lang != "en":
+        try:
+            return GoogleTranslator(source='auto', target='en').translate(text)
+        except Exception:
+            return text
+    return text
+
+def translate_from_en(text, target_lang):
+    if target_lang != "en":
+        try:
+            return GoogleTranslator(source='en', target=target_lang).translate(text)
+        except Exception:
+            return text
+    return text
+    
 # ---------- SIMPLE PERSISTENCE ----------
 def load_data():
     if os.path.exists(DATA_FILE):

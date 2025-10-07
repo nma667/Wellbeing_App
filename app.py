@@ -16,9 +16,7 @@ st.set_page_config(
 # -------------------
 @st.cache_resource
 def load_models():
-    # Sentiment analysis (general)
     sentiment_analyzer = pipeline("sentiment-analysis")
-    # Mental health tuned emotion model
     emotion_classifier = pipeline(
         "text-classification",
         model="j-hartmann/emotion-english-distilroberta-base",
@@ -29,17 +27,29 @@ def load_models():
 sentiment_analyzer, emotion_classifier = load_models()
 
 # -------------------
-# WELLBEING INTERPRETER
+# HELPER FUNCTIONS
 # -------------------
+def normalize_emotions(raw_output):
+    """
+    Convert the output of emotion_classifier to a consistent list of dicts:
+    [{"label": ..., "score": ...}, ...]
+    """
+    if isinstance(raw_output, dict):
+        return [{"label": k, "score": v} for k, v in raw_output.items()]
+    elif isinstance(raw_output, list):
+        if len(raw_output) > 0 and isinstance(raw_output[0], dict) and "label" in raw_output[0]:
+            return raw_output  # already list of dicts
+        elif len(raw_output) > 0 and isinstance(raw_output[0], list):
+            # sometimes returned as list of lists
+            return [{"label": e["label"], "score": e["score"]} for e in raw_output[0]]
+    return [{"label": "neutral", "score": 1.0}]  # fallback
+
 def interpret_emotions(text):
-    """
-    Generate human-readable wellbeing summary from text.
-    """
-    emotions = emotion_classifier(text[:512])
+    emotions_raw = emotion_classifier(text[:512])
+    emotions = normalize_emotions(emotions_raw)
     top_emotions = sorted(emotions, key=lambda x: x['score'], reverse=True)[:3]
     labels = [e['label'].lower() for e in top_emotions]
 
-    # Check for nuanced states
     if "sadness" in labels:
         return "This text reflects emotional fatigue, sadness, or mild depression."
     elif "anger" in labels or "disgust" in labels:
@@ -52,6 +62,27 @@ def interpret_emotions(text):
         return "The text appears calm or neutral, though subtle emotions may be present."
     else:
         return "The text has mixed emotional tones."
+
+def detect_top_emotion(text):
+    emotions_raw = emotion_classifier(text[:512])
+    emotions = normalize_emotions(emotions_raw)
+    if emotions:
+        return max(emotions, key=lambda x: x['score'])['label'].lower()
+    return "neutral"
+
+def generate_chat_response(top_emotion):
+    if top_emotion == "sadness":
+        return "I hear you 💛. It sounds like you're feeling really down or tired. Do you want to talk more about it?"
+    elif top_emotion in ["anger", "disgust"]:
+        return "It seems something is frustrating or upsetting you 😔. I'm here to listen if you want to share."
+    elif top_emotion == "fear":
+        return "You might be feeling anxious or worried 😟. Would you like to talk about what's on your mind?"
+    elif top_emotion in ["joy", "love"]:
+        return "It's wonderful to hear that! 😊 Keep embracing those positive moments."
+    elif top_emotion == "neutral":
+        return "I understand. Sometimes it's hard to put feelings into words. Want to share more?"
+    else:
+        return "Thanks for sharing. I'm here to listen to whatever you're feeling."
 
 # -------------------
 # SIDEBAR
@@ -83,7 +114,8 @@ if page == "📄 Assignment Analyzer":
             with st.spinner("Analyzing..."):
                 time.sleep(2)
                 sentiment = sentiment_analyzer(text[:512])[0]
-                emotions = emotion_classifier(text[:512])
+                emotions_raw = emotion_classifier(text[:512])
+                emotions = normalize_emotions(emotions_raw)
                 interpretation = interpret_emotions(text)
 
             st.success("✅ Analysis Complete!")
@@ -113,24 +145,8 @@ elif page == "💬 Wellbeing Chatbox":
             st.session_state.chat_history.append(("user", user_input))
             with st.spinner("Thinking..."):
                 time.sleep(1.5)
-                # Detect emotion from user message
-                emotions = emotion_classifier(user_input[:512])
-                top_emotion = max(emotions, key=lambda x: x['score'])['label'].lower()
-
-                # Generate empathetic response
-                if top_emotion == "sadness":
-                    bot_reply = "I hear you 💛. It sounds like you're feeling really down or tired. Do you want to talk more about it?"
-                elif top_emotion in ["anger", "disgust"]:
-                    bot_reply = "It seems something is frustrating or upsetting you 😔. I'm here to listen if you want to share."
-                elif top_emotion == "fear":
-                    bot_reply = "You might be feeling anxious or worried 😟. Would you like to talk about what's on your mind?"
-                elif top_emotion in ["joy", "love"]:
-                    bot_reply = "It's wonderful to hear that! 😊 Keep embracing those positive moments."
-                elif top_emotion == "neutral":
-                    bot_reply = "I understand. Sometimes it's hard to put feelings into words. Want to share more?"
-                else:
-                    bot_reply = "Thanks for sharing. I'm here to listen to whatever you're feeling."
-
+                top_emotion = detect_top_emotion(user_input)
+                bot_reply = generate_chat_response(top_emotion)
             st.session_state.chat_history.append(("bot", bot_reply))
         else:
             st.warning("Please enter a message before sending.")

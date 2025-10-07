@@ -12,15 +12,16 @@ st.set_page_config(
 )
 
 # -------------------
-# LOAD LOCAL MODELS
+# LOAD MODELS
 # -------------------
 @st.cache_resource
 def load_models():
+    # Sentiment analysis (general)
     sentiment_analyzer = pipeline("sentiment-analysis")
-    # Mental-health tuned emotion model
+    # Mental health tuned emotion model
     emotion_classifier = pipeline(
-        "text-classification", 
-        model="j-hartmann/emotion-english-distilroberta-base", 
+        "text-classification",
+        model="j-hartmann/emotion-english-distilroberta-base",
         top_k=None
     )
     return sentiment_analyzer, emotion_classifier
@@ -30,27 +31,27 @@ sentiment_analyzer, emotion_classifier = load_models()
 # -------------------
 # WELLBEING INTERPRETER
 # -------------------
-def interpret_emotions(sentiment, emotions):
+def interpret_emotions(text):
     """
-    Generate a human-readable wellbeing summary from sentiment and emotions.
+    Generate human-readable wellbeing summary from text.
     """
+    emotions = emotion_classifier(text[:512])
     top_emotions = sorted(emotions, key=lambda x: x['score'], reverse=True)[:3]
     labels = [e['label'].lower() for e in top_emotions]
-    
-    # Basic interpretation rules
-    if "sadness" in labels or "anger" in labels or "fear" in labels:
-        mood = "This text shows signs of emotional fatigue, stress, or mild depression."
-    elif "joy" in labels or "love" in labels:
-        mood = "This text reflects positive emotions and wellbeing."
-    elif "neutral" in labels:
-        if sentiment['label'] == "NEGATIVE":
-            mood = "Even though it seems neutral, there's a subtle negative tone indicating possible low mood."
-        else:
-            mood = "The text appears neutral in tone."
-    else:
-        mood = "The text has mixed emotional tones."
 
-    return mood
+    # Check for nuanced states
+    if "sadness" in labels:
+        return "This text reflects emotional fatigue, sadness, or mild depression."
+    elif "anger" in labels or "disgust" in labels:
+        return "There is frustration, anger, or irritation present."
+    elif "fear" in labels:
+        return "The text shows signs of anxiety or worry."
+    elif "joy" in labels or "love" in labels:
+        return "This text reflects positive emotions and wellbeing."
+    elif "neutral" in labels:
+        return "The text appears calm or neutral, though subtle emotions may be present."
+    else:
+        return "The text has mixed emotional tones."
 
 # -------------------
 # SIDEBAR
@@ -83,6 +84,7 @@ if page == "📄 Assignment Analyzer":
                 time.sleep(2)
                 sentiment = sentiment_analyzer(text[:512])[0]
                 emotions = emotion_classifier(text[:512])
+                interpretation = interpret_emotions(text)
 
             st.success("✅ Analysis Complete!")
             st.subheader("🧠 Wellbeing Analysis")
@@ -92,7 +94,6 @@ if page == "📄 Assignment Analyzer":
             for emo in emotions:
                 st.write(f"- {emo['label']}: {emo['score']:.2f}")
             
-            interpretation = interpret_emotions(sentiment, emotions)
             st.markdown(f"**💡 Wellbeing Interpretation:** {interpretation}")
 
 # -------------------
@@ -110,16 +111,26 @@ elif page == "💬 Wellbeing Chatbox":
     if st.button("Send"):
         if user_input.strip():
             st.session_state.chat_history.append(("user", user_input))
-            # Simulate AI response (offline)
             with st.spinner("Thinking..."):
                 time.sleep(1.5)
-                sentiment = sentiment_analyzer(user_input[:512])[0]["label"]
-                if sentiment == "NEGATIVE":
-                    bot_reply = "I'm sorry you're feeling this way 💛. Want to talk more about what's making you feel down?"
-                elif sentiment == "POSITIVE":
-                    bot_reply = "That's great to hear! 😊 Keep up the positive energy."
+                # Detect emotion from user message
+                emotions = emotion_classifier(user_input[:512])
+                top_emotion = max(emotions, key=lambda x: x['score'])['label'].lower()
+
+                # Generate empathetic response
+                if top_emotion == "sadness":
+                    bot_reply = "I hear you 💛. It sounds like you're feeling really down or tired. Do you want to talk more about it?"
+                elif top_emotion in ["anger", "disgust"]:
+                    bot_reply = "It seems something is frustrating or upsetting you 😔. I'm here to listen if you want to share."
+                elif top_emotion == "fear":
+                    bot_reply = "You might be feeling anxious or worried 😟. Would you like to talk about what's on your mind?"
+                elif top_emotion in ["joy", "love"]:
+                    bot_reply = "It's wonderful to hear that! 😊 Keep embracing those positive moments."
+                elif top_emotion == "neutral":
+                    bot_reply = "I understand. Sometimes it's hard to put feelings into words. Want to share more?"
                 else:
-                    bot_reply = "I understand. Would you like to share more about that?"
+                    bot_reply = "Thanks for sharing. I'm here to listen to whatever you're feeling."
+
             st.session_state.chat_history.append(("bot", bot_reply))
         else:
             st.warning("Please enter a message before sending.")
@@ -129,11 +140,11 @@ elif page == "💬 Wellbeing Chatbox":
     for sender, msg in st.session_state.chat_history:
         if sender == "user":
             st.markdown(
-                f"<div style='background-color:#d4edda; padding:10px; border-radius:10px; margin-bottom:5px; text-align:right;'>{msg}</div>", 
+                f"<div style='background-color:#d4edda; padding:10px; border-radius:10px; margin-bottom:5px; text-align:right;'>{msg}</div>",
                 unsafe_allow_html=True
             )
         else:
             st.markdown(
-                f"<div style='background-color:#f8f9fa; padding:10px; border-radius:10px; margin-bottom:5px;'>{msg}</div>", 
+                f"<div style='background-color:#f8f9fa; padding:10px; border-radius:10px; margin-bottom:5px;'>{msg}</div>",
                 unsafe_allow_html=True
             )

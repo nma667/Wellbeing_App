@@ -17,10 +17,40 @@ st.set_page_config(
 @st.cache_resource
 def load_models():
     sentiment_analyzer = pipeline("sentiment-analysis")
-    emotion_classifier = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", top_k=None)
+    # Mental-health tuned emotion model
+    emotion_classifier = pipeline(
+        "text-classification", 
+        model="j-hartmann/emotion-english-distilroberta-base", 
+        top_k=None
+    )
     return sentiment_analyzer, emotion_classifier
 
 sentiment_analyzer, emotion_classifier = load_models()
+
+# -------------------
+# WELLBEING INTERPRETER
+# -------------------
+def interpret_emotions(sentiment, emotions):
+    """
+    Generate a human-readable wellbeing summary from sentiment and emotions.
+    """
+    top_emotions = sorted(emotions, key=lambda x: x['score'], reverse=True)[:3]
+    labels = [e['label'].lower() for e in top_emotions]
+    
+    # Basic interpretation rules
+    if "sadness" in labels or "anger" in labels or "fear" in labels:
+        mood = "This text shows signs of emotional fatigue, stress, or mild depression."
+    elif "joy" in labels or "love" in labels:
+        mood = "This text reflects positive emotions and wellbeing."
+    elif "neutral" in labels:
+        if sentiment['label'] == "NEGATIVE":
+            mood = "Even though it seems neutral, there's a subtle negative tone indicating possible low mood."
+        else:
+            mood = "The text appears neutral in tone."
+    else:
+        mood = "The text has mixed emotional tones."
+
+    return mood
 
 # -------------------
 # SIDEBAR
@@ -52,14 +82,18 @@ if page == "📄 Assignment Analyzer":
             with st.spinner("Analyzing..."):
                 time.sleep(2)
                 sentiment = sentiment_analyzer(text[:512])[0]
-                emotions = emotion_classifier(text[:512])[0]
+                emotions = emotion_classifier(text[:512])
 
             st.success("✅ Analysis Complete!")
             st.subheader("🧠 Wellbeing Analysis")
             st.write(f"**Overall Sentiment:** {sentiment['label']} ({sentiment['score']:.2f})")
+            
             st.write("**Detected Emotions:**")
             for emo in emotions:
                 st.write(f"- {emo['label']}: {emo['score']:.2f}")
+            
+            interpretation = interpret_emotions(sentiment, emotions)
+            st.markdown(f"**💡 Wellbeing Interpretation:** {interpretation}")
 
 # -------------------
 # WELLBEING CHATBOX
@@ -79,10 +113,10 @@ elif page == "💬 Wellbeing Chatbox":
             # Simulate AI response (offline)
             with st.spinner("Thinking..."):
                 time.sleep(1.5)
-                response = sentiment_analyzer(user_input)[0]["label"]
-                if response == "NEGATIVE":
+                sentiment = sentiment_analyzer(user_input[:512])[0]["label"]
+                if sentiment == "NEGATIVE":
                     bot_reply = "I'm sorry you're feeling this way 💛. Want to talk more about what's making you feel down?"
-                elif response == "POSITIVE":
+                elif sentiment == "POSITIVE":
                     bot_reply = "That's great to hear! 😊 Keep up the positive energy."
                 else:
                     bot_reply = "I understand. Would you like to share more about that?"
@@ -94,6 +128,12 @@ elif page == "💬 Wellbeing Chatbox":
     st.markdown("### 💬 Chat History")
     for sender, msg in st.session_state.chat_history:
         if sender == "user":
-            st.markdown(f"<div style='background-color:#d4edda; padding:10px; border-radius:10px; margin-bottom:5px; text-align:right;'>{msg}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='background-color:#d4edda; padding:10px; border-radius:10px; margin-bottom:5px; text-align:right;'>{msg}</div>", 
+                unsafe_allow_html=True
+            )
         else:
-            st.markdown(f"<div style='background-color:#f8f9fa; padding:10px; border-radius:10px; margin-bottom:5px;'>{msg}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='background-color:#f8f9fa; padding:10px; border-radius:10px; margin-bottom:5px;'>{msg}</div>", 
+                unsafe_allow_html=True
+            )

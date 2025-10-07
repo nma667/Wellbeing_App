@@ -1,133 +1,99 @@
 import streamlit as st
-from textblob import TextBlob
-import json
-import os
-from datetime import datetime
+from transformers import pipeline
+import time
 
-# -------------------- CONFIG --------------------
-st.set_page_config(page_title="AI Wellbeing System", layout="centered")
-st.title("🌿 Bilingual AI Wellbeing Support System")
+# -------------------
+# PAGE CONFIG
+# -------------------
+st.set_page_config(
+    page_title="AI Wellbeing Assistant",
+    layout="wide",
+    page_icon="💬"
+)
 
-# -------------------- HELPER FUNCTIONS --------------------
-def analyze_assignment_local(text):
-    """Offline AI simulation: analyze student text for emotional risk."""
-    text_lower = text.lower()
-    blob = TextBlob(text)
-    sentiment = blob.sentiment.polarity
+# -------------------
+# LOAD LOCAL MODELS
+# -------------------
+@st.cache_resource
+def load_models():
+    sentiment_analyzer = pipeline("sentiment-analysis")
+    emotion_classifier = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base", top_k=None)
+    return sentiment_analyzer, emotion_classifier
 
-    # Keyword detection
-    high_keywords = ["suicide", "die", "hopeless", "worthless", "end it", "tired of life", "kill myself"]
-    medium_keywords = ["sad", "tired", "alone", "empty", "don’t care", "anxious", "depressed", "stressed"]
+sentiment_analyzer, emotion_classifier = load_models()
 
-    # Logic for risk detection
-    if any(word in text_lower for word in high_keywords):
-        risk = "⚠️ High Risk - urgent concern detected"
-    elif any(word in text_lower for word in medium_keywords) or sentiment < -0.2:
-        risk = "🟠 Medium Risk - signs of low mood or stress"
-    else:
-        risk = "🟢 Low Risk - text seems generally positive"
+# -------------------
+# SIDEBAR
+# -------------------
+st.sidebar.title("🧭 Navigation")
+page = st.sidebar.radio("Go to", ["📄 Assignment Analyzer", "💬 Wellbeing Chatbox"])
 
-    # Save result
-    save_analysis(text, risk)
-    return risk
+# -------------------
+# ASSIGNMENT ANALYZER
+# -------------------
+if page == "📄 Assignment Analyzer":
+    st.title("📘 Assignment Analyzer")
+    st.write("Upload or paste a student's work below to analyze its wellbeing tone and emotions.")
 
+    upload_option = st.radio("Choose input method:", ["📤 Upload file", "✏️ Paste text"])
+    text = ""
 
-def save_analysis(text, risk):
-    """Save the analysis locally to data.json"""
-    data = {"text": text, "risk": risk, "timestamp": datetime.now().isoformat()}
-    try:
-        if os.path.exists("data.json"):
-            with open("data.json", "r") as f:
-                existing = json.load(f)
-        else:
-            existing = []
-        existing.append(data)
-        with open("data.json", "w") as f:
-            json.dump(existing, f, indent=4)
-    except Exception as e:
-        st.error(f"Error saving data: {e}")
-
-
-def chat_reply_local(user_input):
-    """Simulated wellbeing chat assistant"""
-    text = user_input.lower()
-    if any(word in text for word in ["sad", "upset", "tired", "anxious", "lonely"]):
-        return "I'm really sorry you're feeling this way 💛. Do you want to tell me more about what’s been bothering you?"
-    elif "okay" in text or "fine" in text:
-        return "It’s okay to just feel ‘okay.’ Some days are like that. How has your week been going?"
-    elif "happy" in text or "good" in text:
-        return "That’s great to hear 😊! What’s been making you feel better lately?"
-    elif "school" in text or "homework" in text:
-        return "School can definitely be stressful. Are you managing okay with your classes?"
-    else:
-        return "I’m here to listen 💬. You can tell me anything that’s on your mind."
-
-
-# -------------------- MAIN APP --------------------
-tabs = st.tabs(["📄 Assignment Analyzer", "💬 Wellbeing Chatbox", "📊 Counselor Dashboard"])
-
-# --- TAB 1: Assignment Analyzer ---
-with tabs[0]:
-    st.header("📄 Analyze Student Assignment")
-    st.write("Paste or upload a student’s text to detect emotional wellbeing signals.")
-
-    uploaded_file = st.file_uploader("Upload a .txt file", type=["txt"])
-    text_input = st.text_area("Or paste the student's writing here:")
-
-    if st.button("🔍 Analyze"):
+    if upload_option == "📤 Upload file":
+        uploaded_file = st.file_uploader("Upload a .txt file", type=["txt"])
         if uploaded_file:
             text = uploaded_file.read().decode("utf-8")
-        elif text_input.strip():
-            text = text_input
+    else:
+        text = st.text_area("Paste the student's text here", height=200)
+
+    if st.button("🔍 Analyze"):
+        if text.strip() == "":
+            st.warning("Please upload or paste some text to analyze.")
         else:
-            st.warning("Please upload a file or paste text first.")
-            st.stop()
+            with st.spinner("Analyzing..."):
+                time.sleep(2)
+                sentiment = sentiment_analyzer(text[:512])[0]
+                emotions = emotion_classifier(text[:512])[0]
 
-        with st.spinner("Analyzing..."):
-            result = analyze_assignment_local(text)
+            st.success("✅ Analysis Complete!")
+            st.subheader("🧠 Wellbeing Analysis")
+            st.write(f"**Overall Sentiment:** {sentiment['label']} ({sentiment['score']:.2f})")
+            st.write("**Detected Emotions:**")
+            for emo in emotions:
+                st.write(f"- {emo['label']}: {emo['score']:.2f}")
 
-        st.success("✅ Analysis Complete!")
-        st.subheader("AI Wellbeing Analysis:")
-        st.info(result)
-
-# --- TAB 2: Chatbox ---
-with tabs[1]:
-    st.header("💬 Wellbeing Chat Support")
-    st.write("A private space for students to chat and receive supportive responses.")
+# -------------------
+# WELLBEING CHATBOX
+# -------------------
+elif page == "💬 Wellbeing Chatbox":
+    st.title("💬 Wellbeing Chat Support")
+    st.write("Chat safely — this assistant offers empathetic, wellbeing-focused support.")
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
-    # Display previous chat messages
-    for msg in st.session_state.chat_history:
-        if msg["sender"] == "user":
-            st.markdown(f"<div style='text-align: right; background-color:#DCF8C6; padding:8px; border-radius:10px; margin:5px 0; max-width:80%; float:right;'>{msg['message']}</div><div style='clear:both;'></div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div style='text-align: left; background-color:#EAEAEA; padding:8px; border-radius:10px; margin:5px 0; max-width:80%; float:left;'>{msg['message']}</div><div style='clear:both;'></div>", unsafe_allow_html=True)
-
-    user_input = st.text_input("Type your message here...")
+    user_input = st.text_input("Type your message...", key="chat_input")
 
     if st.button("Send"):
         if user_input.strip():
-            st.session_state.chat_history.append({"sender": "user", "message": user_input})
-            reply = chat_reply_local(user_input)
-            st.session_state.chat_history.append({"sender": "bot", "message": reply})
-            st.experimental_rerun()
+            st.session_state.chat_history.append(("user", user_input))
+            # Simulate AI response (offline)
+            with st.spinner("Thinking..."):
+                time.sleep(1.5)
+                response = sentiment_analyzer(user_input)[0]["label"]
+                if response == "NEGATIVE":
+                    bot_reply = "I'm sorry you're feeling this way 💛. Want to talk more about what's making you feel down?"
+                elif response == "POSITIVE":
+                    bot_reply = "That's great to hear! 😊 Keep up the positive energy."
+                else:
+                    bot_reply = "I understand. Would you like to share more about that?"
+            st.session_state.chat_history.append(("bot", bot_reply))
+        else:
+            st.warning("Please enter a message before sending.")
 
-# --- TAB 3: Counselor Dashboard ---
-with tabs[2]:
-    st.header("📊 Counselor Dashboard")
-    st.write("View past analyses of uploaded student work.")
-
-    if os.path.exists("data.json"):
-        with open("data.json", "r") as f:
-            data = json.load(f)
-        for entry in reversed(data[-5:]):  # show latest 5
-            st.markdown(f"""
-            **Date:** {entry['timestamp']}  
-            **Risk Level:** {entry['risk']}  
-            **Excerpt:** {entry['text'][:200]}...
-            ---
-            """)
-    else:
-        st.info("No analysis data available yet.")
+    # Display chat
+    st.markdown("### 💬 Chat History")
+    for sender, msg in st.session_state.chat_history:
+        if sender == "user":
+            st.markdown(f"<div style='background-color:#d4edda; padding:10px; border-radius:10px; margin-bottom:5px; text-align:right;'>{msg}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div style='background-color:#f8f9fa; padding:10px; border-radius:10px; margin-bottom:5px;'>{msg}</div>", unsafe_allow_html=True)
